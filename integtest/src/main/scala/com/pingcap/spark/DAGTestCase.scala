@@ -9,11 +9,6 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class DAGTestCase(prop: Properties) extends TestCase(prop) {
-  private val SPARK_DEFAULT_TO_IGNORE = Set[String](
-    "select tp_datetime,tp_date from full_data_type_table  where tp_datetime = tp_date order by id_dt  limit 20", // we cannot get anything from spark, but can get some data from TiDB
-    "select tp_date,tp_datetime from full_data_type_table  where tp_date = tp_datetime order by id_dt  limit 20",
-    "select tp_date,tp_datetime from full_data_type_table  where tp_date < tp_datetime order by id_dt  limit 20"
-  )
   private val compareOpList = List("=", "<", ">", "<=", ">=", "!=", "<>")
   private val arithmeticOpList = List("+", "-", "*", "/", "%")
   private val LEFT_TB_NAME = "A"
@@ -183,9 +178,9 @@ class DAGTestCase(prop: Properties) extends TestCase(prop) {
     select("tp_year") + where(binaryOpWithName("tp_year", "('2017')", "in", withTbName = false)),
     select("tp_real") + where(binaryOpWithName("tp_real", "(4.44,0.5194052764001038)", "in", withTbName = false)),
     select("tp_longtext") + where(binaryOpWithName("tp_longtext", "('很长的一段文字', 'OntPHB22qwSxriGUQ9RLfoiRkEMfEYFZdnAkL7SdpfD59MfmUXpKUAXiJpegn6dcMyfRyBhNw9efQfrl2yMmtM0zJx3ScAgTIA8djNnmCnMVzHgPWVYfHRnl8zENOD5SbrI4HAazss9xBVpikAgxdXKvlxmhfNoYIK0YYnO84MXKkMUinjPQ7zWHbh5lImp7g9HpIXgtkFFTXVvCaTr8mQXXOl957dxePeUvPv28GUdnzXTzk7thTbsWAtqU7YaK4QC4z9qHpbt5ex9ck8uHz2RoptFw71RIoKGiPsBD9YwXAS19goDM2H0yzVtDNJ6ls6jzXrGlJ6gIRG73Er0tVyourPdM42a5oDihfVP6XxjOjS0cmVIIppDSZIofkRfRhQWAunheFbEEPSHx3eybQ6pSIFd34Natgr2erFjyxFIRr7J535HT9aIReYIlocKK2ZI9sfcwhX0PeDNohY2tvHbsrHE0MlKCyVSTjPxszvFjCPlyqwQy')", "in", withTbName = false)),
-    select("tp_text") + where(binaryOpWithName("tp_text", "('一般的文字', 'dQWD3XwSTevpbP5hADFdNO0dQvaueFhnGcJAm045mGv5fXttso')", "in", withTbName = false))
-    //    select("tp_bit") + where(binaryOpWithName("tp_bit", "(1)", "in", withTbName = false))
-    //    select("tp_enum") + where(binaryOpWithName("tp_enum", "(1)", "in", withTbName = false)),
+    select("tp_text") + where(binaryOpWithName("tp_text", "('一般的文字', 'dQWD3XwSTevpbP5hADFdNO0dQvaueFhnGcJAm045mGv5fXttso')", "in", withTbName = false)),
+    select("tp_bit") + where(binaryOpWithName("tp_bit", "(1)", "in", withTbName = false))
+//        select("tp_enum") + where(binaryOpWithName("tp_enum", "(1)", "in", withTbName = false)),
     //    select("tp_set") + where(binaryOpWithName("tp_set", "('a,b')", "in", withTbName = false))
   )
 
