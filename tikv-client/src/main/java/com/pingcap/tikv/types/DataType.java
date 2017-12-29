@@ -223,7 +223,7 @@ public abstract class DataType implements Serializable {
     return tp;
   }
 
-  public static boolean hasNullFlag(int flag) {
+  public static boolean hasNotNullFlag(int flag) {
     return (flag & NotNullFlag) > 0;
   }
 
@@ -244,6 +244,10 @@ public abstract class DataType implements Serializable {
   }
 
   public static boolean hasBinaryFlag(int flag) {
+    return (flag & BinaryFlag) > 0;
+  }
+
+  public static boolean hasPriKeyFlag(int flag) {
     return (flag & PriKeyFlag) > 0;
   }
 
