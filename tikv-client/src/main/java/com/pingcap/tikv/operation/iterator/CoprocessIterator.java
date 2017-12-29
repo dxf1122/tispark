@@ -64,14 +64,15 @@ public abstract class CoprocessIterator<T> implements Iterator<T> {
 
   public static CoprocessIterator<Row> getRowIterator(TiDAGRequest req,
                                                       List<RegionTask> regionTasks,
-                                                      TiSession session) {
+                                                      TiSession session,
+                                                      long sparkTaskId) {
     return new DAGIterator<Row>(
         req.buildScan(false),
         regionTasks,
         session,
         SchemaInfer.create(req),
-        req.getPushDownType()
-    ) {
+        req.getPushDownType(),
+        sparkTaskId) {
       @Override
       public Row next() {
         if (hasNext()) {
@@ -91,8 +92,8 @@ public abstract class CoprocessIterator<T> implements Iterator<T> {
         regionTasks,
         session,
         SchemaInfer.create(req),
-        req.getPushDownType()
-    ) {
+        req.getPushDownType(),
+        -1) {
       @Override
       public Long next() {
         if (hasNext()) {

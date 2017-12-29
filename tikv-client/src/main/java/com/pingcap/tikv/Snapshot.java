@@ -94,7 +94,7 @@ public class Snapshot {
       return getRowIterator(
           dagRequest,
           RangeSplitter.newSplitter(session.getRegionManager()).splitRangeByRegion(dagRequest.getRanges()),
-          session);
+          session, -1);
     }
   }
 
@@ -106,7 +106,7 @@ public class Snapshot {
    * @param task       RegionTask of the coprocessor request to send
    * @return Row iterator to iterate over resulting rows
    */
-  public Iterator<Row> tableRead(TiDAGRequest dagRequest, List<RegionTask> task) {
+  public Iterator<Row> tableRead(TiDAGRequest dagRequest, List<RegionTask> task, long sparkTaskId) {
     if (dagRequest.isIndexScan()) {
       Iterator<Long> iter = getHandleIterator(
           dagRequest,
@@ -117,7 +117,7 @@ public class Snapshot {
       return getRowIterator(
           dagRequest,
           task,
-          session);
+          session, sparkTaskId);
     }
   }
 

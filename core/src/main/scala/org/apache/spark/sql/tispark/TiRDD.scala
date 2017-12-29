@@ -66,7 +66,7 @@ class TiRDD(val dagRequest: TiDAGRequest,
         private val snapshot = session.createSnapshot(ts)
         private val tasks = split.asInstanceOf[TiPartition].tasks.asJava
         private val iterator =
-          snapshot.tableRead(dagRequest, tasks)
+          snapshot.tableRead(dagRequest, tasks, context.taskAttemptId())
         private val finalTypes = rowTransformer.getTypes.toList
         log.info(
           s"Task attempt ID:${context.taskAttemptId()}, stageId:${context

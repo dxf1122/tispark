@@ -31,14 +31,16 @@ public abstract class DAGIterator<T> extends CoprocessIterator<T> {
   private Iterator<SelectResponse> responseIterator;
 
   private final PushDownType pushDownType;
+  private final long sparkTaskId;
 
   DAGIterator(DAGRequest req,
               List<RangeSplitter.RegionTask> regionTasks,
               TiSession session,
               SchemaInfer infer,
-              PushDownType pushDownType) {
+              PushDownType pushDownType, long sparkTaskId) {
     super(req, regionTasks, session, infer);
     this.pushDownType = pushDownType;
+    this.sparkTaskId = sparkTaskId;
     switch (pushDownType) {
       case NORMAL:
         dagService = new ExecutorCompletionService<>(session.getThreadPoolForTableScan());
@@ -160,13 +162,15 @@ public abstract class DAGIterator<T> extends CoprocessIterator<T> {
     RegionStoreClient client;
     try {
       client = RegionStoreClient.create(region, store, session);
-      logger.info("Issuing DAG request" + dagRequest.toString().hashCode());
+      logger.info("Task:" + sparkTaskId + " issuing DAG request:" + dagRequest.toString().hashCode() + " ,region:" + region.getId() + " ,store:" + store.getAddress());
       SelectResponse response = client.coprocess(dagRequest, ranges);
-      logger.info("Finished DAG request:" + dagRequest.toString().hashCode());
+      logger.info("Task:" + sparkTaskId + " finished DAG request:" + dagRequest.toString().hashCode() + " ,region:" + region.getId() + " ,store:" + store.getAddress());
       if (response == null) {
-        logger.error("Response is accidentally null");
+        logger.error("Task:" + sparkTaskId + "Response is accidentally null"  + " ,region:" + region.getId() + " ,store:" + store.getAddress());
         eof = true;
         return null;
+      } else if (response.getChunksList().isEmpty()) {
+        logger.warn("Task:" + sparkTaskId + " received empty chunk data for DAG request:" + dagRequest.toString().hashCode() + " ,region:" + region.getId() + " ,store:" + store.getAddress());
       }
       return response;
     } catch (GrpcRegionStaleException e) {
