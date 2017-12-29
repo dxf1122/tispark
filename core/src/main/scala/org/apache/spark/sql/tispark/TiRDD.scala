@@ -58,50 +58,61 @@ class TiRDD(val dagRequest: TiDAGRequest,
   override def compute(split: Partition, context: TaskContext): Iterator[Row] =
     new InterruptibleIterator[Row](
       context,
-    new Iterator[Row] {
-    dagRequest.resolve()
-    // bypass, sum return a long type
-    private val tiPartition = split.asInstanceOf[TiPartition]
-    private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
-    private val snapshot = session.createSnapshot(ts)
-    private val tasks = split.asInstanceOf[TiPartition].tasks.asJava
-    private val iterator =
-      snapshot.tableRead(dagRequest, tasks)
-    private val finalTypes = rowTransformer.getTypes.toList
-    log.info(s"Task attempt ID:${context.taskAttemptId()},trying to fetch data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
+      new Iterator[Row] {
+        dagRequest.resolve()
+        // bypass, sum return a long type
+        private val tiPartition = split.asInstanceOf[TiPartition]
+        private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
+        private val snapshot = session.createSnapshot(ts)
+        private val tasks = split.asInstanceOf[TiPartition].tasks.asJava
+        private val iterator =
+          snapshot.tableRead(dagRequest, tasks)
+        private val finalTypes = rowTransformer.getTypes.toList
+        log.info(
+          s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
+            .stageId()}, trying to fetch data from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+        )
 
-    if (iterator.hasNext) {
-      log.info(s"tableRead fetched data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
-    } else {
-      log.warn(
-        s"tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
-      )
-    }
-      private var count = 0
+        if (iterator.hasNext) {
+          log.info(
+            s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
+              .stageId()}, tableRead fetched non-empty iterator from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+          )
+        } else {
+          log.warn(
+            s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
+              .stageId()}, tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+          )
+        }
+        private var count = 0
 
-      def toSparkRow(row: TiRow): Row = {
-      val transRow = rowTransformer.transform(row)
-      val rowArray = new Array[Any](finalTypes.size)
+        def toSparkRow(row: TiRow): Row = {
+          val transRow = rowTransformer.transform(row)
+          val rowArray = new Array[Any](finalTypes.size)
 
-      for (i <- 0 until transRow.fieldCount) {
-        rowArray(i) = transRow.get(i, finalTypes(i))
+          for (i <- 0 until transRow.fieldCount) {
+            rowArray(i) = transRow.get(i, finalTypes(i))
+          }
+
+          Row.fromSeq(rowArray)
+        }
+
+        override def hasNext: Boolean = {
+          if (iterator.hasNext) {
+            count += 1
+            true
+          } else {
+            log.info(
+              s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
+                .stageId()}, fetched $count data from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+            )
+            false
+          }
+        }
+
+        override def next(): Row = toSparkRow(iterator.next)
       }
-
-      Row.fromSeq(rowArray)
-    }
-
-    override def hasNext: Boolean = {
-      if (iterator.hasNext) {
-        count += 1
-        true
-      } else {
-        log.info(s"Task attempt ID:${context.taskAttemptId()}, fetched $count data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
-        false
-      }
-    }
-
-    override def next(): Row = toSparkRow(iterator.next)
-  })
+    )
 
   override protected def getPreferredLocations(split: Partition): Seq[String] =
     split.asInstanceOf[TiPartition].tasks.head.getHost :: Nil
