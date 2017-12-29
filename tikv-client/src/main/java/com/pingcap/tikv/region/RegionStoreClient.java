@@ -183,7 +183,10 @@ public class RegionStoreClient extends AbstractGRPCClient<TikvBlockingStub, Tikv
     KVErrorHandler<Coprocessor.Response> handler =
         new KVErrorHandler<>(
             regionManager, this, region, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+    logger.info("Calling request:" + req);
     Coprocessor.Response resp = callWithRetry(TikvGrpc.METHOD_COPROCESSOR, reqToSend, handler);
+    logger.info("Completed request:" + req);
+
     return coprocessorHelper(resp);
   }
 
@@ -237,8 +240,10 @@ public class RegionStoreClient extends AbstractGRPCClient<TikvBlockingStub, Tikv
     try {
       SelectResponse selectResp = SelectResponse.parseFrom(resp.getData());
       if (selectResp.hasError()) {
+        logger.error("Response error: " + selectResp.getError().getMsg());
         throw new SelectException(selectResp.getError(), selectResp.getError().getMsg());
       }
+      logger.info("Parsing request successfully");
       return selectResp;
     } catch (InvalidProtocolBufferException e) {
       throw new TiClientInternalException("Error parsing protobuf for coprocessor response.", e);

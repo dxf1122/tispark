@@ -13,6 +13,7 @@ import com.pingcap.tikv.operation.SchemaInfer;
 import com.pingcap.tikv.region.RegionStoreClient;
 import com.pingcap.tikv.region.TiRegion;
 import com.pingcap.tikv.util.RangeSplitter;
+import org.apache.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -25,6 +26,7 @@ public abstract class DAGIterator<T> extends CoprocessIterator<T> {
   private ExecutorCompletionService<Iterator<SelectResponse>> streamingService;
   private ExecutorCompletionService<SelectResponse> dagService;
   private SelectResponse response;
+  private static final Logger logger = Logger.getLogger(DAGIterator.class);
 
   private Iterator<SelectResponse> responseIterator;
 
@@ -158,8 +160,11 @@ public abstract class DAGIterator<T> extends CoprocessIterator<T> {
     RegionStoreClient client;
     try {
       client = RegionStoreClient.create(region, store, session);
+      logger.info("Issuing DAG request:" + dagRequest);
       SelectResponse response = client.coprocess(dagRequest, ranges);
+      logger.info("Finished DAG request:" + dagRequest);
       if (response == null) {
+        logger.error("Response is accidentally null");
         eof = true;
         return null;
       }

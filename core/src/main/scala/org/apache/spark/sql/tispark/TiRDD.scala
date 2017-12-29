@@ -63,6 +63,11 @@ class TiRDD(val dagRequest: TiDAGRequest,
     private val iterator =
       snapshot.tableRead(dagRequest, split.asInstanceOf[TiPartition].tasks.asJava)
     private val finalTypes = rowTransformer.getTypes.toList
+    if (iterator.hasNext) {
+      log.info(s"tableRead fetched data size ${iterator.size}")
+    } else {
+      log.warn("tableRead fetched NO DATA")
+    }
 
     def toSparkRow(row: TiRow): Row = {
       val transRow = rowTransformer.transform(row)

@@ -62,6 +62,11 @@ class TiHandleRDD(val dagRequest: TiDAGRequest,
       private val tableId = dagRequest.getTableInfo.getId
       private val regionManager = session.getRegionManager
       private val regionHandleMap = new TLongObjectHashMap[TLongLinkedList]()
+      if (iterator.hasNext) {
+        log.info("indexHandleRead fetched data")
+      } else {
+        log.warn("indexHandleRead fetched NO DATA")
+      }
       // Fetch all handles
       while (handleIter.hasNext) {
         val handle = handleIter.next()
