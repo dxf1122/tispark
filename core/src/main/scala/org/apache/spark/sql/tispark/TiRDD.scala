@@ -59,14 +59,15 @@ class TiRDD(val dagRequest: TiDAGRequest,
     private val tiPartition = split.asInstanceOf[TiPartition]
     private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
     private val snapshot = session.createSnapshot(ts)
-
+    private val tasks =  split.asInstanceOf[TiPartition].tasks.asJava
     private val iterator =
-      snapshot.tableRead(dagRequest, split.asInstanceOf[TiPartition].tasks.asJava)
+      snapshot.tableRead(dagRequest, tasks)
     private val finalTypes = rowTransformer.getTypes.toList
+
     if (iterator.hasNext) {
-      log.info(s"tableRead fetched data")
+      log.info(s"tableRead fetched data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
     } else {
-      log.warn("tableRead fetched NO DATA")
+      log.warn(s"tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
     }
 
     def toSparkRow(row: TiRow): Row = {
