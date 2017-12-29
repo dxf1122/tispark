@@ -70,18 +70,18 @@ class TiRDD(val dagRequest: TiDAGRequest,
         private val finalTypes = rowTransformer.getTypes.toList
         log.info(
           s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
-            .stageId()}, trying to fetch data from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+            .stageId()}, trying to fetch data from region: ${tasks.map(_.getRegion.getId).zip(tasks.map(_.getHost)).mkString(",")}"
         )
 
         if (iterator.hasNext) {
           log.info(
             s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
-              .stageId()}, tableRead fetched non-empty iterator from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+              .stageId()}, tableRead fetched non-empty iterator from region: ${tasks.map(_.getRegion.getId).zip(tasks.map(_.getHost)).mkString(",")}"
           )
         } else {
           log.warn(
             s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
-              .stageId()}, tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+              .stageId()}, tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).zip(tasks.map(_.getHost)).mkString(",")}"
           )
         }
         private var count = 0
@@ -104,7 +104,7 @@ class TiRDD(val dagRequest: TiDAGRequest,
           } else {
             log.info(
               s"Task attempt ID:${context.taskAttemptId()}, stageId:${context
-                .stageId()}, fetched $count data from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+                .stageId()}, fetched $count data from region: ${tasks.map(_.getRegion.getId).zip(tasks.map(_.getHost)).mkString(",")}"
             )
             false
           }
