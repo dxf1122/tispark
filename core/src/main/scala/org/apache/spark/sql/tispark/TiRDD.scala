@@ -16,6 +16,7 @@
 package org.apache.spark.sql.tispark
 
 import com.pingcap.tikv._
+import com.pingcap.tikv.exception.TiClientInternalException
 import com.pingcap.tikv.meta.{TiDAGRequest, TiTimestamp}
 import com.pingcap.tikv.operation.SchemaInfer
 import com.pingcap.tikv.operation.transformer.RowTransformer
@@ -27,12 +28,13 @@ import gnu.trove.list.array.TLongArrayList
 import org.apache.log4j.Logger
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.{Partition, TaskContext}
+import org.apache.spark.{InterruptibleIterator, Partition, TaskContext}
 
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.util.Random
 
 class TiRDD(val dagRequest: TiDAGRequest,
             val tiConf: TiConfiguration,
@@ -53,24 +55,31 @@ class TiRDD(val dagRequest: TiDAGRequest,
     (schemaInferrer.getTypes.toList, rowTransformer)
   }
 
-  override def compute(split: Partition, context: TaskContext): Iterator[Row] = new Iterator[Row] {
+  override def compute(split: Partition, context: TaskContext): Iterator[Row] =
+    new InterruptibleIterator[Row](
+      context,
+    new Iterator[Row] {
     dagRequest.resolve()
     // bypass, sum return a long type
     private val tiPartition = split.asInstanceOf[TiPartition]
     private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
     private val snapshot = session.createSnapshot(ts)
-    private val tasks =  split.asInstanceOf[TiPartition].tasks.asJava
+    private val tasks = split.asInstanceOf[TiPartition].tasks.asJava
     private val iterator =
       snapshot.tableRead(dagRequest, tasks)
     private val finalTypes = rowTransformer.getTypes.toList
+    log.info(s"Task attempt ID:${context.taskAttemptId()},trying to fetch data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
 
     if (iterator.hasNext) {
       log.info(s"tableRead fetched data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
     } else {
-      log.warn(s"tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
+      log.warn(
+        s"tableRead fetched NO DATA from region: ${tasks.map(_.getRegion.getId).mkString(",")}"
+      )
     }
+      private var count = 0
 
-    def toSparkRow(row: TiRow): Row = {
+      def toSparkRow(row: TiRow): Row = {
       val transRow = rowTransformer.transform(row)
       val rowArray = new Array[Any](finalTypes.size)
 
@@ -81,10 +90,18 @@ class TiRDD(val dagRequest: TiDAGRequest,
       Row.fromSeq(rowArray)
     }
 
-    override def hasNext: Boolean = iterator.hasNext
+    override def hasNext: Boolean = {
+      if (iterator.hasNext) {
+        count += 1
+        true
+      } else {
+        log.info(s"Task attempt ID:${context.taskAttemptId()}, fetched $count data from region: ${tasks.map(_.getRegion.getId).mkString(",")}")
+        false
+      }
+    }
 
     override def next(): Row = toSparkRow(iterator.next)
-  }
+  })
 
   override protected def getPreferredLocations(split: Partition): Seq[String] =
     split.asInstanceOf[TiPartition].tasks.head.getHost :: Nil
