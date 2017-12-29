@@ -183,9 +183,9 @@ public class RegionStoreClient extends AbstractGRPCClient<TikvBlockingStub, Tikv
     KVErrorHandler<Coprocessor.Response> handler =
         new KVErrorHandler<>(
             regionManager, this, region, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
-    logger.info("Calling request:" + req);
+    logger.info("Calling request:" + req.toString().hashCode());
     Coprocessor.Response resp = callWithRetry(TikvGrpc.METHOD_COPROCESSOR, reqToSend, handler);
-    logger.info("Completed request:" + req);
+    logger.info("Completed request:" + req.toString().hashCode());
 
     return coprocessorHelper(resp);
   }

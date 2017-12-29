@@ -160,9 +160,9 @@ public abstract class DAGIterator<T> extends CoprocessIterator<T> {
     RegionStoreClient client;
     try {
       client = RegionStoreClient.create(region, store, session);
-      logger.info("Issuing DAG request:" + dagRequest);
+      logger.info("Issuing DAG request" + dagRequest.toString().hashCode());
       SelectResponse response = client.coprocess(dagRequest, ranges);
-      logger.info("Finished DAG request:" + dagRequest);
+      logger.info("Finished DAG request:" + dagRequest.toString().hashCode());
       if (response == null) {
         logger.error("Response is accidentally null");
         eof = true;

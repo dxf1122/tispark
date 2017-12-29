@@ -24,6 +24,7 @@ import com.pingcap.tikv.util.RangeSplitter
 import com.pingcap.tikv.util.RangeSplitter.RegionTask
 import com.pingcap.tispark.{TiConfigConst, TiPartition, TiSessionCache, TiTableReference}
 import gnu.trove.list.array.TLongArrayList
+import org.apache.log4j.Logger
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{Partition, TaskContext}
@@ -54,7 +55,6 @@ class TiRDD(val dagRequest: TiDAGRequest,
 
   override def compute(split: Partition, context: TaskContext): Iterator[Row] = new Iterator[Row] {
     dagRequest.resolve()
-
     // bypass, sum return a long type
     private val tiPartition = split.asInstanceOf[TiPartition]
     private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
@@ -64,7 +64,7 @@ class TiRDD(val dagRequest: TiDAGRequest,
       snapshot.tableRead(dagRequest, split.asInstanceOf[TiPartition].tasks.asJava)
     private val finalTypes = rowTransformer.getTypes.toList
     if (iterator.hasNext) {
-      log.info(s"tableRead fetched data size ${iterator.size}")
+      log.info(s"tableRead fetched data")
     } else {
       log.warn("tableRead fetched NO DATA")
     }

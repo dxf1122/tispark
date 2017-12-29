@@ -24,6 +24,7 @@ import com.pingcap.tikv.{TiConfiguration, TiSession}
 import com.pingcap.tispark.{TiConfigConst, TiPartition, TiSessionCache, TiTableReference}
 import gnu.trove.list.linked.TLongLinkedList
 import gnu.trove.map.hash.TLongObjectHashMap
+import org.apache.log4j.Logger
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{Partition, TaskContext}
@@ -53,6 +54,7 @@ class TiHandleRDD(val dagRequest: TiDAGRequest,
   override def compute(split: Partition, context: TaskContext): Iterator[Row] =
     new Iterator[Row] {
       dagRequest.resolve()
+
       // bypass, sum return a long type
       private val tiPartition = split.asInstanceOf[TiPartition]
       private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
@@ -62,11 +64,6 @@ class TiHandleRDD(val dagRequest: TiDAGRequest,
       private val tableId = dagRequest.getTableInfo.getId
       private val regionManager = session.getRegionManager
       private val regionHandleMap = new TLongObjectHashMap[TLongLinkedList]()
-      if (iterator.hasNext) {
-        log.info("indexHandleRead fetched data")
-      } else {
-        log.warn("indexHandleRead fetched NO DATA")
-      }
       // Fetch all handles
       while (handleIter.hasNext) {
         val handle = handleIter.next()
@@ -83,6 +80,11 @@ class TiHandleRDD(val dagRequest: TiDAGRequest,
       }
 
       private val iterator = regionHandleMap.iterator()
+      if (iterator.hasNext) {
+        log.info("indexHandleRead fetched data")
+      } else {
+        log.warn("indexHandleRead fetched NO DATA")
+      }
 
       override def hasNext: Boolean = iterator.hasNext
 
