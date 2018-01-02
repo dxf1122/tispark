@@ -32,18 +32,21 @@ import org.apache.log4j.Logger
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, GenericInternalRow, SortOrder, UnsafeProjection, UnsafeRow}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, BoundReference, GenericInternalRow, SortOrder, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.tispark.{TiHandleRDD, TiRDD}
 import org.apache.spark.sql.types.{ArrayType, DataType, LongType, Metadata}
 import org.apache.spark.sql.{Row, SparkSession}
 import com.pingcap.tispark.TiDBRelation
+import org.apache.spark.sql.catalyst.expressions.codegen.CodegenContext
 
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD) extends LeafExecNode {
+case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD)
+    extends LeafExecNode
+    with CodegenSupport {
 
   override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows")
@@ -72,6 +75,32 @@ case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD) extends LeafExec
   }
 
   override def simpleString: String = verboseString
+
+  override def inputRDDs(): Seq[RDD[InternalRow]] = internalRdd :: Nil
+
+  override protected def doProduce(ctx: CodegenContext): String = {
+    val numOutputRows = metricTerm(ctx, "numOutputRows")
+
+    val input = ctx.freshName("input")
+    ctx.addMutableState("scala.collection.Iterator", input, s"$input = inputs[0];")
+    val exprRows = output.zipWithIndex.map {
+      case (a, i) =>
+        BoundReference(i, a.dataType, a.nullable)
+    }
+    val row = ctx.freshName("row")
+    ctx.INPUT_ROW = row
+    ctx.currentVars = null
+    val columnsRowInput = exprRows.map(_.genCode(ctx))
+    val inputRow = null
+    s"""
+       |while ($input.hasNext()) {
+       |  InternalRow $row = (InternalRow) $input.next();
+       |  $numOutputRows.add(1);
+       |  ${consume(ctx, columnsRowInput, inputRow).trim}
+       |  if (shouldStop()) return;
+       |}
+     """.stripMargin
+  }
 }
 
 /**
