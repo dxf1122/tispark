@@ -3,7 +3,6 @@ set -ue
 
 source _env.sh
 
-echo ${BASEDIR}
 echo "usage: <bin> [-d | --debug]"
 
 clear_last_diff_files
