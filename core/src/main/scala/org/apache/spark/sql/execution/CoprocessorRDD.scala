@@ -35,21 +35,22 @@ import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, BoundReference, GenericInternalRow, SortOrder, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.execution.metric.SQLMetrics
-import org.apache.spark.sql.tispark.{TiHandleRDD, TiRDD}
+import org.apache.spark.sql.tispark.{CoprocessorScanRDD, TiHandleRDD, TiRDD}
 import org.apache.spark.sql.types.{ArrayType, DataType, LongType, Metadata}
 import org.apache.spark.sql.{Row, SparkSession}
 import com.pingcap.tispark.TiDBRelation
-import org.apache.spark.sql.catalyst.expressions.codegen.CodegenContext
+import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD)
+case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD, copRdd: CoprocessorScanRDD = null)
     extends LeafExecNode
     with CodegenSupport {
 
   override lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows")
+    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+    "scanTime" -> SQLMetrics.createTimingMetric(sparkContext, "scan time")
   )
 
   override val nodeName: String = "CoprocessorRDD"
@@ -60,6 +61,10 @@ case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD)
 
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
+    if (copRdd != null) {
+      return copRdd
+    }
+
     internalRdd.mapPartitionsWithIndexInternal { (index, iter) =>
       val proj = UnsafeProjection.create(schema)
       proj.initialize(index)
@@ -76,9 +81,17 @@ case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD)
 
   override def simpleString: String = verboseString
 
-  override def inputRDDs(): Seq[RDD[InternalRow]] = internalRdd :: Nil
+  override def inputRDDs(): Seq[RDD[InternalRow]] =
+    if (copRdd != null) {
+      copRdd :: Nil
+    } else {
+      internalRdd :: Nil
+    }
 
   override protected def doProduce(ctx: CodegenContext): String = {
+    if (copRdd != null) {
+      return doProduceVectorized(ctx)
+    }
     val numOutputRows = metricTerm(ctx, "numOutputRows")
 
     val input = ctx.freshName("input")
@@ -101,6 +114,96 @@ case class CoprocessorRDD(output: Seq[Attribute], tiRdd: TiRDD)
        |}
      """.stripMargin
   }
+
+  // Support codegen so that we can avoid the UnsafeRow conversion in all cases. Codegen
+  // never requires UnsafeRow as input.
+  private def doProduceVectorized(ctx: CodegenContext): String = {
+    val input = ctx.freshName("input")
+    // PhysicalRDD always just has one input
+    ctx.addMutableState("scala.collection.Iterator", input, s"$input = inputs[0];")
+
+    // metrics
+    val numOutputRows = metricTerm(ctx, "numOutputRows")
+    val scanTimeMetric = metricTerm(ctx, "scanTime")
+    val scanTimeTotalNs = ctx.freshName("scanTime")
+    ctx.addMutableState("long", scanTimeTotalNs, s"$scanTimeTotalNs = 0;")
+
+    val columnarBatchClz = "org.apache.spark.sql.execution.vectorized.ColumnarBatch"
+    val batch = ctx.freshName("batch")
+    ctx.addMutableState(columnarBatchClz, batch, s"$batch = null;")
+
+    val columnVectorClz = "org.apache.spark.sql.execution.vectorized.ColumnVector"
+    val idx = ctx.freshName("batchIdx")
+    ctx.addMutableState("int", idx, s"$idx = 0;")
+    val colVars = output.indices.map(i => ctx.freshName("colInstance" + i))
+    val columnAssigns = colVars.zipWithIndex.map {
+      case (name, i) =>
+        ctx.addMutableState(columnVectorClz, name, s"$name = null;")
+        s"$name = $batch.column($i);"
+    }
+
+    val nextBatch = ctx.freshName("nextBatch")
+    ctx.addNewFunction(
+      nextBatch,
+      s"""
+         |private void $nextBatch() throws java.io.IOException {
+         |  long getBatchStart = System.nanoTime();
+         |  if ($input.hasNext()) {
+         |    $batch = ($columnarBatchClz)$input.next();
+         |    $numOutputRows.add($batch.numRows());
+         |    $idx = 0;
+         |    ${columnAssigns.mkString("", "\n", "\n")}
+         |  }
+         |  $scanTimeTotalNs += System.nanoTime() - getBatchStart;
+         |}""".stripMargin
+    )
+
+    ctx.currentVars = null
+    val rowidx = ctx.freshName("rowIdx")
+    val columnsBatchInput = (output zip colVars).map {
+      case (attr, colVar) =>
+        genCodeColumnVector(ctx, colVar, rowidx, attr.dataType, attr.nullable)
+    }
+    s"""
+       |if ($batch == null) {
+       |  $nextBatch();
+       |}
+       |while ($batch != null) {
+       |  int numRows = $batch.numRows();
+       |  while ($idx < numRows) {
+       |    int $rowidx = $idx++;
+       |    ${consume(ctx, columnsBatchInput).trim}
+       |    if (shouldStop()) return;
+       |  }
+       |  $batch = null;
+       |  $nextBatch();
+       |}
+       |$scanTimeMetric.add($scanTimeTotalNs / (1000 * 1000));
+       |$scanTimeTotalNs = 0;
+     """.stripMargin
+  }
+
+  private def genCodeColumnVector(ctx: CodegenContext,
+                                  columnVar: String,
+                                  ordinal: String,
+                                  dataType: DataType,
+                                  nullable: Boolean): ExprCode = {
+    val javaType = ctx.javaType(dataType)
+    val value = ctx.getValue(columnVar, dataType, ordinal)
+    val isNullVar = if (nullable) { ctx.freshName("isNull") } else { "false" }
+    val valueVar = ctx.freshName("value")
+    val str = s"columnVector[$columnVar, $ordinal, ${dataType.simpleString}]"
+    val code = s"${ctx.registerComment(str)}\n" + (if (nullable) {
+                                                     s"""
+        boolean $isNullVar = $columnVar.isNullAt($ordinal);
+        $javaType $valueVar = $isNullVar ? ${ctx.defaultValue(dataType)} : ($value);
+      """
+                                                   } else {
+                                                     s"$javaType $valueVar = $value;"
+                                                   }).trim
+    ExprCode(code, isNullVar, valueVar)
+  }
+
 }
 
 /**

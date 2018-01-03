@@ -1,30 +1,18 @@
-/*
- * Copyright 2017 PingCAP, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package org.apache.spark.sql.tispark
 
-import com.pingcap.tikv._
 import com.pingcap.tikv.meta.{TiDAGRequest, TiTimestamp}
 import com.pingcap.tikv.operation.SchemaInfer
 import com.pingcap.tikv.operation.transformer.RowTransformer
 import com.pingcap.tikv.types.DataType
 import com.pingcap.tikv.util.RangeSplitter
 import com.pingcap.tikv.util.RangeSplitter.RegionTask
-import com.pingcap.tispark.{TiConfigConst, TiPartition, TiSessionCache, TiTableReference}
-import gnu.trove.list.array.TLongArrayList
+import com.pingcap.tikv.{TiConfiguration, TiSession}
+import com.pingcap.tispark._
+import org.apache.spark.memory.MemoryMode
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.execution.vectorized.ColumnVectorUtils
+import org.apache.spark.sql.types.StructField
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.{Partition, TaskContext}
 
@@ -33,17 +21,16 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-class TiRDD(val dagRequest: TiDAGRequest,
-            val tiConf: TiConfiguration,
-            val tableRef: TiTableReference,
-            val ts: TiTimestamp,
-            @transient private val session: TiSession,
-            @transient private val sparkSession: SparkSession)
-    extends RDD[Row](sparkSession.sparkContext, Nil) {
-
+class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
+                         val tiConf: TiConfiguration,
+                         val tableRef: TiTableReference,
+                         val ts: TiTimestamp,
+                         @transient private val session: TiSession,
+                         @transient private val sparkSession: SparkSession)
+    extends RDD[InternalRow](sparkSession.sparkContext, Nil) {
   type TiRow = com.pingcap.tikv.row.Row
 
-  @transient lazy val (_: List[DataType], rowTransformer: RowTransformer) =
+  @transient lazy val (dataTypes: List[DataType], rowTransformer: RowTransformer) =
     initializeSchema()
 
   def initializeSchema(): (List[DataType], RowTransformer) = {
@@ -52,32 +39,42 @@ class TiRDD(val dagRequest: TiDAGRequest,
     (schemaInferrer.getTypes.toList, rowTransformer)
   }
 
-  override def compute(split: Partition, context: TaskContext): Iterator[Row] = new Iterator[Row] {
+  override def compute(split: Partition, context: TaskContext): Iterator[InternalRow] = {
     dagRequest.resolve()
-
-    // bypass, sum return a long type
-    private val tiPartition = split.asInstanceOf[TiPartition]
-    private val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
-    private val snapshot = session.createSnapshot(ts)
-
-    private val iterator =
-      snapshot.tableRead(dagRequest, split.asInstanceOf[TiPartition].tasks)
-    private val finalTypes = rowTransformer.getTypes.toList
-
     def toSparkRow(row: TiRow): Row = {
       val transRow = rowTransformer.transform(row)
-      val rowArray = new Array[Any](finalTypes.size)
+      val rowArray = new Array[Any](dataTypes.size)
 
       for (i <- 0 until transRow.fieldCount) {
-        rowArray(i) = transRow.get(i, finalTypes(i))
+        rowArray(i) = transRow.get(i, dataTypes(i))
       }
 
       Row.fromSeq(rowArray)
     }
 
-    override def hasNext: Boolean = iterator.hasNext
+    val tiPartition = split.asInstanceOf[TiPartition]
+    val session = TiSessionCache.getSession(tiPartition.appId, tiConf)
+    val snapshot = session.createSnapshot(ts)
+    val coprocessorIterator =
+      snapshot.tableRead(dagRequest, tiPartition.tasks)
+    val fields = dataTypes.map(
+      (dt: DataType) => StructField("", TiUtils.toSparkDataType(dt), nullable = true, null)
+    )
+    val batchIterator = coprocessorIterator.asScala
+      .map(toSparkRow)
+      .grouped(1000)
+      .map(_.iterator)
+      .map(
+        (rows: Iterator[Row]) =>
+          ColumnVectorUtils.toBatch(
+            new org.apache.spark.sql.types.StructType(fields.toArray),
+            MemoryMode.ON_HEAP,
+            rows
+        )
+      )
+//    val iterator = batchIterator
 
-    override def next(): Row = toSparkRow(iterator.next)
+    batchIterator.asInstanceOf[Iterator[InternalRow]] // This is an erasure hack.
   }
 
   override protected def getPreferredLocations(split: Partition): Seq[String] =
