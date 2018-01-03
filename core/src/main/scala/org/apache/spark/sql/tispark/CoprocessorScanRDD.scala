@@ -28,7 +28,7 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
                          val enableBatch: Boolean,
                          @transient private val session: TiSession,
                          @transient private val sparkSession: SparkSession)
-  extends RDD[InternalRow](sparkSession.sparkContext, Nil) {
+    extends RDD[InternalRow](sparkSession.sparkContext, Nil) {
   type TiRow = com.pingcap.tikv.row.Row
 
   @transient lazy val (dataTypes: List[DataType], rowTransformer: RowTransformer) =
@@ -73,7 +73,7 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
             new org.apache.spark.sql.types.StructType(fields.toArray),
             MemoryMode.ON_HEAP,
             rows
-          )
+        )
       )
 
     batchIterator.asInstanceOf[Iterator[InternalRow]] // This is an erasure hack.
@@ -93,7 +93,7 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
 
     val taskPerSplit = conf.get(TiConfigConst.TASK_PER_SPLIT, "1").toInt
     val hostTasksMap = new mutable.HashMap[String, mutable.Set[RegionTask]]
-      with mutable.MultiMap[String, RegionTask]
+    with mutable.MultiMap[String, RegionTask]
 
     var index = 0
     val result = new ListBuffer[TiPartition]

@@ -44,8 +44,11 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCo
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-case class CoprocessorExec(output: Seq[Attribute], tiRdd: TiRDD, copRdd: CoprocessorScanRDD, enableBatch: Boolean = true)
-  extends LeafExecNode
+case class CoprocessorExec(output: Seq[Attribute],
+                           tiRdd: TiRDD,
+                           copRdd: CoprocessorScanRDD,
+                           enableBatch: Boolean = true)
+    extends LeafExecNode
     with CodegenSupport {
 
   override lazy val metrics = Map(
@@ -62,10 +65,11 @@ case class CoprocessorExec(output: Seq[Attribute], tiRdd: TiRDD, copRdd: Coproce
   protected override def doExecute(): RDD[InternalRow] = {
     val numOutputRows = longMetric("numOutputRows")
     if (enableBatch) {
-      copRdd.map { (row: InternalRow) => {
-        numOutputRows += 1
-        row
-      }
+      copRdd.map { (row: InternalRow) =>
+        {
+          numOutputRows += 1
+          row
+        }
       }
     } else {
       internalRdd.mapPartitionsWithIndexInternal { (index, iter) =>
@@ -85,11 +89,12 @@ case class CoprocessorExec(output: Seq[Attribute], tiRdd: TiRDD, copRdd: Coproce
 
   override def simpleString: String = verboseString
 
-  override def inputRDDs(): Seq[RDD[InternalRow]] = if (enableBatch) {
-    copRdd :: Nil
-  } else {
-    internalRdd :: Nil
-  }
+  override def inputRDDs(): Seq[RDD[InternalRow]] =
+    if (enableBatch) {
+      copRdd :: Nil
+    } else {
+      internalRdd :: Nil
+    }
 
   override protected def doProduce(ctx: CodegenContext): String = {
     if (enableBatch) {
@@ -201,24 +206,24 @@ case class CoprocessorExec(output: Seq[Attribute], tiRdd: TiRDD, copRdd: Coproce
     val valueVar = ctx.freshName("value")
     val str = s"columnVector[$columnVar, $ordinal, ${dataType.simpleString}]"
     val code = s"${ctx.registerComment(str)}\n" + (if (nullable) {
-      s"""
+                                                     s"""
         boolean $isNullVar = $columnVar.isNullAt($ordinal);
         $javaType $valueVar = $isNullVar ? ${ctx.defaultValue(dataType)} : ($value);
       """
-    } else {
-      s"$javaType $valueVar = $value;"
-    }).trim
+                                                   } else {
+                                                     s"$javaType $valueVar = $value;"
+                                                   }).trim
     ExprCode(code, isNullVar, valueVar)
   }
 
 }
 
 /**
-  * HandleRDDExec is used for scanning handles from TiKV as a LeafExecNode in index plan.
-  * Providing handle scan via a TiHandleRDD.
-  *
-  * @param tiHandleRDD handle source
-  */
+ * HandleRDDExec is used for scanning handles from TiKV as a LeafExecNode in index plan.
+ * Providing handle scan via a TiHandleRDD.
+ *
+ * @param tiHandleRDD handle source
+ */
 case class HandleRDDExec(tiHandleRDD: TiHandleRDD) extends LeafExecNode {
   override val nodeName: String = "HandleRDD"
 
@@ -264,16 +269,16 @@ case class HandleRDDExec(tiHandleRDD: TiHandleRDD) extends LeafExecNode {
 }
 
 /**
-  * RegionTaskExec is used for issuing requests which are generated based on handles retrieved from
-  * [[HandleRDDExec]] aggregated by a [[org.apache.spark.sql.execution.aggregate.SortAggregateExec]]
-  * with [[org.apache.spark.sql.catalyst.expressions.aggregate.CollectHandles]] as aggregate function.
-  *
-  * RegionTaskExec will downgrade a index scan plan to table scan plan if handles retrieved from one
-  * region exceed spark.tispark.plan.downgrade.index_threshold in your spark config.
-  *
-  * Refer to code in [[TiDBRelation]] and [[CoprocessorExec]] for further details.
-  *
-  */
+ * RegionTaskExec is used for issuing requests which are generated based on handles retrieved from
+ * [[HandleRDDExec]] aggregated by a [[org.apache.spark.sql.execution.aggregate.SortAggregateExec]]
+ * with [[org.apache.spark.sql.catalyst.expressions.aggregate.CollectHandles]] as aggregate function.
+ *
+ * RegionTaskExec will downgrade a index scan plan to table scan plan if handles retrieved from one
+ * region exceed spark.tispark.plan.downgrade.index_threshold in your spark config.
+ *
+ * Refer to code in [[TiDBRelation]] and [[CoprocessorExec]] for further details.
+ *
+ */
 case class RegionTaskExec(child: SparkPlan,
                           output: Seq[Attribute],
                           dagRequest: TiDAGRequest,
@@ -281,7 +286,7 @@ case class RegionTaskExec(child: SparkPlan,
                           ts: TiTimestamp,
                           @transient private val session: TiSession,
                           @transient private val sparkSession: SparkSession)
-  extends UnaryExecNode {
+    extends UnaryExecNode {
 
   override lazy val metrics = Map(
     "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
@@ -342,7 +347,7 @@ case class RegionTaskExec(child: SparkPlan,
           def feedBatch(): TLongArrayList = {
             val handles = new array.TLongArrayList(512)
             while (handleIterator.hasNext &&
-              handles.size() < batchSize) {
+                   handles.size() < batchSize) {
               handles.add(handleIterator.next())
             }
             handles
@@ -360,22 +365,22 @@ case class RegionTaskExec(child: SparkPlan,
           }
 
           /**
-            * Checks whether a request should be downgraded according to some restrictions
-            *
-            * @return true, the request should be downgraded, false otherwise.
-            */
+           * Checks whether a request should be downgraded according to some restrictions
+           *
+           * @return true, the request should be downgraded, false otherwise.
+           */
           def shouldDowngrade: Boolean = {
             handles.length > downgradeThreshold
           }
 
           /**
-            * Checks whether the tasks are valid.
-            *
-            * Currently we only check whether the task list contains only one [[RegionTask]],
-            * since in each partition, handles received are from the same region.
-            *
-            * @param tasks tasks to examine
-            */
+           * Checks whether the tasks are valid.
+           *
+           * Currently we only check whether the task list contains only one [[RegionTask]],
+           * since in each partition, handles received are from the same region.
+           *
+           * @param tasks tasks to examine
+           */
           def proceedTasksOrThrow(tasks: Seq[RegionTask]): Unit = {
             if (tasks.lengthCompare(1) != 0) {
               throw new RuntimeException(s"Unexpected region task size:${tasks.size}, expecting 1")
@@ -383,12 +388,12 @@ case class RegionTaskExec(child: SparkPlan,
           }
 
           /**
-            * If one task's ranges list exceeds some threshold, we split it into tow sub tasks and
-            * each has half of the original ranges.
-            *
-            * @param tasks task list to examine
-            * @return split task list
-            */
+           * If one task's ranges list exceeds some threshold, we split it into tow sub tasks and
+           * each has half of the original ranges.
+           *
+           * @param tasks task list to examine
+           * @return split task list
+           */
           def splitTasks(tasks: Seq[RegionTask]): mutable.Seq[RegionTask] = {
             val finalTasks = mutable.ListBuffer[RegionTask]()
             tasks.foreach(finalTasks += _)
@@ -409,7 +414,7 @@ case class RegionTaskExec(child: SparkPlan,
 
           def isTaskRangeSizeInvalid(task: RegionTask): Boolean = {
             task == null ||
-              task.getRanges.size() > tiConf.getMaxRequestKeyRangeSize
+            task.getRanges.size() > tiConf.getMaxRequestKeyRangeSize
           }
 
           def submitTasks(tasks: util.List[RegionTask]): Unit = {
