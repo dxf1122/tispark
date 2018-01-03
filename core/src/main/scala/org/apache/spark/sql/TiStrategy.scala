@@ -58,6 +58,10 @@ class TiStrategy(context: SQLContext) extends Strategy with Logging {
     new TypeBlacklist(blacklistString)
   }
 
+  def enableCoprocessorCodeGene(): Boolean = {
+    sqlConf.getConfString(TiConfigConst.ENABLE_COPROCESSOR_CODEGENE, "true").toBoolean
+  }
+
   def allowAggregationPushDown(): Boolean = {
     sqlConf.getConfString(TiConfigConst.ALLOW_AGG_PUSHDOWN, "true").toBoolean
   }
@@ -118,8 +122,9 @@ class TiStrategy(context: SQLContext) extends Strategy with Logging {
       if (dagRequest.isIndexScan) {
         source.dagRequestToRegionTaskExec(dagRequest, output)
       } else {
-        val tiRdd = source.logicalPlanToRDD(dagRequest)
-        CoprocessorRDD(output, tiRdd, source.logicalPlanToCoprocessorRDD(dagRequest))
+        val scanRDD = source.logicalPlanToCoprocessorRDD(dagRequest)
+        val tiRDD = source.logicalPlanToRDD(dagRequest)
+        CoprocessorExec(output, tiRDD, scanRDD, enableCoprocessorCodeGene())
       }
     }
   }

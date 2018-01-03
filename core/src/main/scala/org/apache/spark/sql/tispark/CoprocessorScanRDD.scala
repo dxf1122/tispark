@@ -25,9 +25,10 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
                          val tiConf: TiConfiguration,
                          val tableRef: TiTableReference,
                          val ts: TiTimestamp,
+                         val enableBatch: Boolean,
                          @transient private val session: TiSession,
                          @transient private val sparkSession: SparkSession)
-    extends RDD[InternalRow](sparkSession.sparkContext, Nil) {
+  extends RDD[InternalRow](sparkSession.sparkContext, Nil) {
   type TiRow = com.pingcap.tikv.row.Row
 
   @transient lazy val (dataTypes: List[DataType], rowTransformer: RowTransformer) =
@@ -41,6 +42,7 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
 
   override def compute(split: Partition, context: TaskContext): Iterator[InternalRow] = {
     dagRequest.resolve()
+
     def toSparkRow(row: TiRow): Row = {
       val transRow = rowTransformer.transform(row)
       val rowArray = new Array[Any](dataTypes.size)
@@ -57,12 +59,13 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
     val snapshot = session.createSnapshot(ts)
     val coprocessorIterator =
       snapshot.tableRead(dagRequest, tiPartition.tasks)
+
     val fields = dataTypes.map(
       (dt: DataType) => StructField("", TiUtils.toSparkDataType(dt), nullable = true, null)
     )
     val batchIterator = coprocessorIterator.asScala
       .map(toSparkRow)
-      .grouped(1000)
+      .grouped(4096)
       .map(_.iterator)
       .map(
         (rows: Iterator[Row]) =>
@@ -70,9 +73,8 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
             new org.apache.spark.sql.types.StructType(fields.toArray),
             MemoryMode.ON_HEAP,
             rows
-        )
+          )
       )
-//    val iterator = batchIterator
 
     batchIterator.asInstanceOf[Iterator[InternalRow]] // This is an erasure hack.
   }
@@ -91,7 +93,7 @@ class CoprocessorScanRDD(val dagRequest: TiDAGRequest,
 
     val taskPerSplit = conf.get(TiConfigConst.TASK_PER_SPLIT, "1").toInt
     val hostTasksMap = new mutable.HashMap[String, mutable.Set[RegionTask]]
-    with mutable.MultiMap[String, RegionTask]
+      with mutable.MultiMap[String, RegionTask]
 
     var index = 0
     val result = new ListBuffer[TiPartition]

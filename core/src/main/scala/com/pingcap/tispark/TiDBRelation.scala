@@ -52,6 +52,7 @@ class TiDBRelation(session: TiSession, tableRef: TiTableReference, meta: MetaMan
       session.getConf,
       tableRef,
       ts,
+      enableBatch = true,
       session,
       sqlContext.sparkSession
     )
